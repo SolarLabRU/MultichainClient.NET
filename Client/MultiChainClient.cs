@@ -22,7 +22,7 @@ namespace Platform.DataAccess.MultiChain.Client
         private string Username { get; set; }
         private string Password { get; set; }
 
-        public event EventHandler<EventArgs<JsonRpcRequest>> Executing;
+        //public event EventHandler<EventArgs<JsonRpcRequest>> Executing;
 
         /// <summary>
         /// Constructor
@@ -281,33 +281,33 @@ namespace Platform.DataAccess.MultiChain.Client
         private static string FormatPermissions(BlockchainPermissions permissions)
         {
             StringBuilder builder = new StringBuilder();
-            if ((int) (permissions & BlockchainPermissions.Connect) != 0)
+            if ((int)(permissions & BlockchainPermissions.Connect) != 0)
                 builder.Append("connect");
-            if ((int) (permissions & BlockchainPermissions.Send) != 0)
+            if ((int)(permissions & BlockchainPermissions.Send) != 0)
             {
                 if (builder.Length > 0)
                     builder.Append(",");
                 builder.Append("send");
             }
-            if ((int) (permissions & BlockchainPermissions.Receive) != 0)
+            if ((int)(permissions & BlockchainPermissions.Receive) != 0)
             {
                 if (builder.Length > 0)
                     builder.Append(",");
                 builder.Append("receive");
             }
-            if ((int) (permissions & BlockchainPermissions.Issue) != 0)
+            if ((int)(permissions & BlockchainPermissions.Issue) != 0)
             {
                 if (builder.Length > 0)
                     builder.Append(",");
                 builder.Append("issue");
             }
-            if ((int) (permissions & BlockchainPermissions.Mine) != 0)
+            if ((int)(permissions & BlockchainPermissions.Mine) != 0)
             {
                 if (builder.Length > 0)
                     builder.Append(",");
                 builder.Append("mine");
             }
-            if ((int) (permissions & BlockchainPermissions.Admin) != 0)
+            if ((int)(permissions & BlockchainPermissions.Admin) != 0)
             {
                 if (builder.Length > 0)
                     builder.Append(",");
@@ -486,7 +486,7 @@ namespace Platform.DataAccess.MultiChain.Client
         public Task<JsonRpcResponse<string>> SendToAddressAsync(string address, string assetName, decimal amount,
             string comment = null, string commentTo = null)
         {
-            var theAmount = new Dictionary<string, object> {[assetName] = amount};
+            var theAmount = new Dictionary<string, object> { [assetName] = amount };
             return ExecuteAsync<string>("sendtoaddress", 0, address, theAmount, comment ?? string.Empty,
                 commentTo ?? string.Empty);
         }
@@ -558,7 +558,7 @@ namespace Platform.DataAccess.MultiChain.Client
         public Task<JsonRpcResponse<string>> SendWithMetadataAsync(string address, string assetName, decimal amount,
             byte[] dataHex)
         {
-            var theAmount = new Dictionary<string, object> {[assetName] = amount};
+            var theAmount = new Dictionary<string, object> { [assetName] = amount };
             return ExecuteAsync<string>("sendwithmetadata", 0, address, theAmount, FormatHex(dataHex));
         }
 
@@ -575,7 +575,7 @@ namespace Platform.DataAccess.MultiChain.Client
         public Task<JsonRpcResponse<string>> SendWithMetadataFromAsync(string fromAddress, string toAddress,
             string assetName, decimal amount, byte[] dataHex)
         {
-            var theAmount = new Dictionary<string, object> {[assetName] = amount};
+            var theAmount = new Dictionary<string, object> { [assetName] = amount };
             return ExecuteAsync<string>("sendwithmetadatafrom", 0, fromAddress, toAddress, theAmount,
                 FormatHex(dataHex));
         }
@@ -634,11 +634,11 @@ namespace Platform.DataAccess.MultiChain.Client
         /// <param name="key">provided in text form</param>
         /// <param name="message">data-hex in hexadecimal</param>
         /// <returns></returns>
-        public Task<JsonRpcResponse<object>> Publish(string streamName, string key, string message)
+        public async Task<JsonRpcResponse<object>> Publish(string streamName, string key, string message)
         {
             var bs = Encoding.UTF8.GetBytes(message);
 
-            return ExecuteAsync<object>("publish", 1, streamName, key, FormatHex(bs));
+            return await ExecuteAsync<object>("publish", 1, streamName, key, FormatHex(bs));
         }
 
         #endregion
@@ -1198,28 +1198,36 @@ namespace Platform.DataAccess.MultiChain.Client
             };
 
             // defer...
-            OnExecuting(new EventArgs<JsonRpcRequest>(ps));
+            //OnExecuting(new EventArgs<JsonRpcRequest>(ps));
 
             var jsonOut = JsonConvert.SerializeObject(ps.Values);
             var url = ServiceUrl;
             try
             {
-                var request = WebRequest.CreateHttp(url);
+                var request = (HttpWebRequest)WebRequest.Create(url);
+                //Timeout after 30000 ms
+                request.Timeout = 30000;
                 request.Credentials = GetCredentials();
                 request.Method = "POST";
 
                 var bs = Encoding.UTF8.GetBytes(jsonOut);
-                using (var stream = await request.GetRequestStreamAsync())
+                using (var stream = request.GetRequestStream())
                     stream.Write(bs, 0, bs.Length);
 
                 // get the response...
-                var response = await request.GetResponseAsync();
+                var response = (HttpWebResponse)await request.GetResponseAsync();
                 string jsonIn = null;
-                using (var stream = ((HttpWebResponse) response).GetResponseStream())
+                using (var stream = response.GetResponseStream())
+                {
                     if (stream != null)
-                        jsonIn = await new StreamReader(stream).ReadToEndAsync();
-
-                // return...
+                    {
+                        using (var reader = new StreamReader(stream))
+                        {
+                            jsonIn = reader.ReadToEnd();
+                        }
+                    }
+                }
+                response.Close();
                 JsonRpcResponse<T> theResult;
                 try
                 {
@@ -1244,8 +1252,12 @@ namespace Platform.DataAccess.MultiChain.Client
 
                     if (walk is WebException)
                     {
-                        var webEx = (WebException) walk;
-                        if (webEx.Response != null)
+                        var webEx = (WebException)walk;
+                        if (webEx.Status == WebExceptionStatus.Timeout)
+                        {
+                            errorData = $"Method {method} have been processing too long.";
+                        }
+                        else if (webEx.Response != null)
                         {
                             using (var stream = webEx.Response.GetResponseStream())
                                 if (stream != null)
@@ -1262,10 +1274,10 @@ namespace Platform.DataAccess.MultiChain.Client
             }
         }
 
-        protected virtual void OnExecuting(EventArgs<JsonRpcRequest> e)
-        {
-            Executing?.Invoke(this, e);
-        }
+        //protected virtual void OnExecuting(EventArgs<JsonRpcRequest> e)
+        //{
+        //    Executing?.Invoke(this, e);
+        //}
 
         private string ServiceUrl
         {
